@@ -10,9 +10,18 @@ module VagrantPlugins
 
       def configure
         @machine.communicate.tap do |comm|
-          comm.sudo("cp /lib/systemd/system/docker.service /etc/systemd/system/docker.service")
-          comm.sudo("sed -ie 's,docker daemon,docker daemon --registry-mirror #{@config.scheme}://#{@config.host}:#{@config.port},g' /etc/systemd/system/docker.service")
-          comm.sudo("sed -ie 's,docker daemon,docker daemon --insecure-registry #{@config.host}:#{@config.port},g' /etc/systemd/system/docker.service") if @config.insecure
+          #comm.sudo("cp /lib/systemd/system/docker.service /etc/systemd/system/docker.service")
+          comm.sudo("mkdir -p /etc/systemd/system/docker.service.d/")
+          comm.sudo("mkdir -p /etc/sysconfig")
+          options = "DOCKER_OPTS=\""
+          options += " --registry-mirror #{@config.scheme}://#{@config.host}:#{@config.port}"
+          options += " --insecure-registry #{@config.host}:#{@config.port}" if @config.insecure
+          options += "\""
+          comm.sudo("echo #{options} > /etc/sysconfig/docker")
+          comm.sudo("echo [Service] > /etc/systemd/system/docker.service.d/docker.conf")
+          comm.sudo("echo EnvironmentFile=-/etc/sysconfig/docker >> /etc/systemd/system/docker.service.d/docker.conf")
+          comm.sudo("echo ExecStart= >> /etc/systemd/system/docker.service.d/docker.conf")
+          comm.sudo("echo ExecStart=/usr/bin/docker daemon -H fd:// \\\$DOCKER_OPTS >> /etc/systemd/system/docker.service.d/docker.conf")
           comm.sudo("systemctl daemon-reload")
           comm.sudo("systemctl restart docker")
         end
