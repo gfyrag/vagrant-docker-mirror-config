@@ -12,16 +12,21 @@ module VagrantPlugins
 
       def configure
         @machine.communicate.tap do |comm|
-          if comm.test("cat /etc/docker/daemon.json 2>&1")
-            json = comm.sudo("cat /etc/docker/daemon.json 2>&1")
-            json = json.parse(json)
+          json = nil
+          if comm.test("test -f /etc/docker/daemon.json", { :sudo => true })
+            comm.sudo("cat /etc/docker/daemon.json", { :shell => "/bin/sh" }) do |type, data|
+              json = JSON.parse(data)
+            end
           else
             json = {}
           end
+          registryMirror = "#{@config.scheme}://#{@config.host}:#{@config.port}"
+          insecureHost= "#{@config.host}:#{@config.port}"
+
           json["registry-mirrors"] = [] if not json['registry-mirrors']
-          json["registry-mirrors"].insert(0, "#{@config.scheme}://#{@config.host}:#{@config.port}")
+          json["registry-mirrors"].insert(0, "#{@config.scheme}://#{@config.host}:#{@config.port}") if not json["registry-mirrors"].include? registryMirror
           json["insecure-registries"] = [] if not json['insecure-registries'] && @config.insecure
-          json["insecure-registries"].insert(0, "#{@config.host}:#{@config.port}") if @config.insecure
+          json["insecure-registries"].insert(0, "#{@config.host}:#{@config.port}") if @config.insecure if not json["insecure-registries"].include? insecureHost
           File.open("/tmp/daemon.json", 'w') { |file| file.write(JSON.pretty_generate(json)) }
           comm.upload("/tmp/daemon.json", "/tmp/daemon.json")
           comm.sudo("mv /tmp/daemon.json /etc/docker/daemon.json")
