@@ -1,4 +1,6 @@
 require "pathname"
+require "json"
+require "vagrant/util/downloader"
 
 module VagrantPlugins
   module DockerMirrorConfigProvisioner
@@ -10,18 +12,19 @@ module VagrantPlugins
 
       def configure
         @machine.communicate.tap do |comm|
-          #comm.sudo("cp /lib/systemd/system/docker.service /etc/systemd/system/docker.service")
-          comm.sudo("mkdir -p /etc/systemd/system/docker.service.d/")
-          comm.sudo("mkdir -p /etc/sysconfig")
-          options = "DOCKER_OPTS=\""
-          options += " --registry-mirror #{@config.scheme}://#{@config.host}:#{@config.port}"
-          options += " --insecure-registry #{@config.host}:#{@config.port}" if @config.insecure
-          options += "\""
-          comm.sudo("echo #{options} > /etc/sysconfig/docker")
-          comm.sudo("echo [Service] > /etc/systemd/system/docker.service.d/docker.conf")
-          comm.sudo("echo EnvironmentFile=-/etc/sysconfig/docker >> /etc/systemd/system/docker.service.d/docker.conf")
-          comm.sudo("echo ExecStart= >> /etc/systemd/system/docker.service.d/docker.conf")
-          comm.sudo("echo ExecStart=/usr/bin/docker daemon -H fd:// \\\$DOCKER_OPTS >> /etc/systemd/system/docker.service.d/docker.conf")
+          if comm.test("cat /etc/docker/daemon.json 2>&1")
+            json = comm.sudo("cat /etc/docker/daemon.json 2>&1")
+            json = json.parse(json)
+          else
+            json = {}
+          end
+          json["registry-mirrors"] = [] if not json['registry-mirrors']
+          json["registry-mirrors"].insert(0, "#{@config.scheme}://#{@config.host}:#{@config.port}")
+          json["insecure-registries"] = [] if not json['insecure-registries'] && @config.insecure
+          json["insecure-registries"].insert(0, "#{@config.host}:#{@config.port}") if @config.insecure
+          File.open("/tmp/daemon.json", 'w') { |file| file.write(JSON.pretty_generate(json)) }
+          comm.upload("/tmp/daemon.json", "/tmp/daemon.json")
+          comm.sudo("mv /tmp/daemon.json /etc/docker/daemon.json")
           comm.sudo("systemctl daemon-reload")
           comm.sudo("systemctl restart docker")
         end
